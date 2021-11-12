@@ -16,6 +16,7 @@ def parseArgs():
     parser.add_argument('-o', '--output', help='The directory to which output files will be saved', type=str, required=False)
     parser.add_argument('-m', '--markers', help='A text file with a marker on each line to specify which markers to use for clustering', type=str, required=False)
     parser.add_argument('-k', '--neighbors', help='the number of nearest neighbors to use when clustering. The default is 30.', default=30, type=int, required=False)
+    parser.add_argument('-r', '--resolution', help='the resolution controls the coarseness of the clustering. Higher values lead to more clusters. The default is 1.0.', default=1.0, type=float, required=False)
     parser.add_argument('-c', '--method', help='Include a column with the method name in the output files.', action="store_true", required=False)
     parser.add_argument('-y', '--config', help='A yaml config file that states whether the input data should be log/logicle transformed.', type=str, required=False)
     parser.add_argument('--force-transform', help='Log transform the input data. If omitted, and --no-transform is omitted, log transform is only performed if the max value in the input data is >1000.', action='store_true', required=False)
@@ -107,6 +108,7 @@ def clean(input_file):
 Write CELLS_FILE from leidenCluster() adata
 '''
 def writeCells(adata):
+    print("Writing Cells...")
     cells = pd.DataFrame(adata.obs[CELL_ID].astype(int)) # extract cell IDs to dataframe
     cells[CLUSTER] = adata.obs[LEIDEN] # extract and add cluster assignments to cells dataframe
 
@@ -121,6 +123,7 @@ def writeCells(adata):
 Write CLUSTERS_FILE from leidenCluster() adata
 '''
 def writeClusters(adata):
+    print("Writing Clusters...")
     clusters = pd.DataFrame(columns=adata.var_names, index=adata.obs[LEIDEN].cat.categories)   
     clusters.index.name = CLUSTER # name indices as cluster column
     for cluster in adata.obs.leiden.cat.categories: # this assumes that LEIDEN = 'leiden' if the name is changed, replace it for 'leiden' in this line
@@ -145,6 +148,7 @@ def getMax(df):
 Cluster data using the Leiden algorithm via scanpy
 '''
 def leidenCluster():
+    print("Starting leidenCluster()...")
 
     sc.settings.verbosity = 3 # print out information
     adata_init = sc.read(f'{output}/{clean_data_file}', cache=True) # load in clean data
@@ -153,7 +157,8 @@ def leidenCluster():
     # this assumes that 'CELL_ID' is the first column in the csv
     adata_init.obs[CELL_ID] = adata_init.X[:,0]
     adata = ad.AnnData(np.delete(adata_init.X, 0, 1), obs=adata_init.obs, var=adata_init.var.drop([CELL_ID]))
-
+    
+    print("Started writing config")
     # log transform the data according to parameter. If 'auto,' transform only if the max value >1000. Don't do anything if transform == 'false'. Write transform decision to yaml file.
     if transform == 'true':
         sc.pp.log1p(adata, base=10)
@@ -163,11 +168,13 @@ def leidenCluster():
         writeConfig(True)
     else:
         writeConfig(False)
-
+    print("Finished writing config")
+    
     # compute neighbors and cluster
+    #sc.pp.neighbors(adata, n_neighbors=args.neighbors)
     sc.pp.neighbors(adata, n_neighbors=args.neighbors, n_pcs=10) # compute neighbors, using the first 10 principle components and the number of neighbors provided in the command line. Default is 30.
-    sc.tl.leiden(adata, key_added = LEIDEN, resolution=1.0) # run leidan clustering. default resolution is 1.0
-
+    sc.tl.leiden(adata, key_added = LEIDEN, resolution=args.resolution) # run leidan clustering. default resolution is 1.0
+    print("Finished leiden clustering")
     # write cell/cluster information to 'CELLS_FILE'
     writeCells(adata)
 
@@ -179,7 +186,9 @@ def leidenCluster():
 Write to a yaml file whether the data was transformed or not.
 '''
 def writeConfig(transformed):
-    os.mkdir('qc')
+    qcExists = os.path.exists('qc')
+    if not qcExists: 
+        os.mkdir('qc')
     with open('qc/config.yml', 'a') as f:
         f.write('---\n')
         if transformed:
@@ -246,6 +255,8 @@ if __name__ == '__main__':
     
     # clean input data file
     clean(args.input)
+
+    print("Entering Leiden function...")
 
     # cluster using scanpy implementation of Leiden algorithm
     leidenCluster()
